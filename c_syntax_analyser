@@ -3,27 +3,31 @@
 #include <string.h>
 #include <ctype.h>
 
+// --- Token Definitions ---
 typedef enum {
     TOKEN_EOF = -1,
     TOKEN_ERROR = 0,
     TOKEN_INT_KEYWORD,
     TOKEN_IDENTIFIER,
-    TOKEN_ASSIGN_OP,
-    TOKEN_SEMICOLON, 
+    TOKEN_ASSIGN_OP, // =
+    TOKEN_SEMICOLON, // ;
     TOKEN_NUMBER,
-    TOKEN_LPAREN,    
-    TOKEN_RPAREN,    
-    TOKEN_LBRACE,    
-    TOKEN_RBRACE,    
+    TOKEN_LPAREN,    // (
+    TOKEN_RPAREN,    // )
+    TOKEN_LBRACE,    // {
+    TOKEN_RBRACE,    // }
     TOKEN_IF_KEYWORD,
-    TOKEN_WHILE_KEYWORD, 
-    TOKEN_PLUS,          
-    TOKEN_MINUS,         
-    TOKEN_MULTIPLY,     
-    TOKEN_DIVIDE,        
-    TOKEN_EQ_OP,        
-    TOKEN_LT_OP,        
-    TOKEN_GT_OP          
+    TOKEN_WHILE_KEYWORD,
+    TOKEN_PLUS,          // + operator
+    TOKEN_MINUS,         // - operator
+    TOKEN_MULTIPLY,      // * operator
+    TOKEN_DIVIDE,        // / operator
+    TOKEN_EQ_OP,         // == operator
+    TOKEN_LT_OP,         // < operator
+    TOKEN_GT_OP,         // > operator
+    TOKEN_HASH,          // New: # for preprocessor directives
+    TOKEN_COMMA,         // New: , for function parameters
+    TOKEN_RETURN_KEYWORD // New: return keyword
 } TokenType;
 
 typedef struct {
@@ -31,18 +35,55 @@ typedef struct {
     char lexeme[256];
 } Token;
 
-char *input_code;       
-int current_pos = 0;    
-Token current_token;    
+// --- Global Variables for Lexer and Parser ---
+char *input_code;       // Pointer to the input C code string
+int current_pos = 0;    // Current reading position in the input_code
+Token current_token;    // The token currently being processed by the parser
 
-void skip_whitespace() {
-    while (isspace(input_code[current_pos])) {
-        current_pos++;
+// --- Lexer (Scanner) Functions ---
+
+// Moves to the next non-whitespace character and skips comments
+void skip_whitespace_and_comments() {
+    while (1) {
+        // Skip whitespace
+        while (isspace(input_code[current_pos])) {
+            current_pos++;
+        }
+
+        // Skip single-line comments //
+        if (input_code[current_pos] == '/' && input_code[current_pos + 1] == '/') {
+            current_pos += 2; // Skip '//'
+            while (input_code[current_pos] != '\n' && input_code[current_pos] != '\0') {
+                current_pos++;
+            }
+            if (input_code[current_pos] == '\n') { // Skip the newline as well
+                current_pos++;
+            }
+            continue; // Continue skipping until no more whitespace or comments
+        }
+
+        // Skip multi-line comments /* ... */
+        if (input_code[current_pos] == '/' && input_code[current_pos + 1] == '*') {
+            current_pos += 2; // Skip '/*'
+            while (!(input_code[current_pos] == '*' && input_code[current_pos + 1] == '/') && input_code[current_pos] != '\0') {
+                current_pos++;
+            }
+            if (input_code[current_pos] == '*' && input_code[current_pos + 1] == '/') {
+                current_pos += 2; // Skip '*/'
+            } else {
+                fprintf(stderr, "Lexical Error: Unclosed multi-line comment starting at position %d\n", current_pos - 2);
+                exit(1);
+            }
+            continue; // Continue skipping
+        }
+        break; // No more whitespace or comments
     }
 }
 
+
+// Gets the next token from the input_code
 Token get_next_token() {
-    skip_whitespace();
+    skip_whitespace_and_comments(); // Use the enhanced skip function
 
     Token token;
     token.type = TOKEN_ERROR;
@@ -56,11 +97,30 @@ Token get_next_token() {
         return token;
     }
 
+    // New: Handle Preprocessor Directives
+    if (c == '#') {
+        token.type = TOKEN_HASH;
+        strcpy(token.lexeme, "#");
+        current_pos++; // Consume '#'
+        // For simplicity, we just skip the rest of the line for preprocessor directives.
+        // A real compiler would invoke a preprocessor here.
+        while (input_code[current_pos] != '\n' && input_code[current_pos] != '\0') {
+            current_pos++;
+        }
+        // Consume the newline if it exists, to not interfere with next token
+        if (input_code[current_pos] == '\n') {
+            current_pos++;
+        }
+        return token;
+    }
+
+
+    // Identifiers and Keywords
     if (isalpha(c) || c == '_') {
         int i = 0;
         while (isalnum(input_code[current_pos]) || input_code[current_pos] == '_') {
             token.lexeme[i++] = input_code[current_pos++];
-            if (i >= 255) break; 
+            if (i >= 255) break; // Prevent buffer overflow
         }
         token.lexeme[i] = '\0';
 
@@ -68,14 +128,18 @@ Token get_next_token() {
             token.type = TOKEN_INT_KEYWORD;
         } else if (strcmp(token.lexeme, "if") == 0) {
             token.type = TOKEN_IF_KEYWORD;
-        } else if (strcmp(token.lexeme, "while") == 0) { 
+        } else if (strcmp(token.lexeme, "while") == 0) {
             token.type = TOKEN_WHILE_KEYWORD;
-        } else {
+        } else if (strcmp(token.lexeme, "return") == 0) { // New: return keyword
+            token.type = TOKEN_RETURN_KEYWORD;
+        }
+        else {
             token.type = TOKEN_IDENTIFIER;
         }
         return token;
     }
 
+    // Numbers
     if (isdigit(c)) {
         int i = 0;
         while (isdigit(input_code[current_pos])) {
@@ -87,12 +151,13 @@ Token get_next_token() {
         return token;
     }
 
+    // Operators and Punctuation
     switch (c) {
         case '=':
-            if (input_code[current_pos + 1] == '=') { 
+            if (input_code[current_pos + 1] == '=') { // Check for '=='
                 token.type = TOKEN_EQ_OP;
                 strcpy(token.lexeme, "==");
-                current_pos++; 
+                current_pos++; // Consume the second '='
             } else {
                 token.type = TOKEN_ASSIGN_OP;
                 strcpy(token.lexeme, "=");
@@ -118,7 +183,7 @@ Token get_next_token() {
             token.type = TOKEN_RBRACE;
             strcpy(token.lexeme, "}");
             break;
-        case '+': 
+        case '+':
             token.type = TOKEN_PLUS;
             strcpy(token.lexeme, "+");
             break;
@@ -126,11 +191,11 @@ Token get_next_token() {
             token.type = TOKEN_MINUS;
             strcpy(token.lexeme, "-");
             break;
-        case '*': 
+        case '*':
             token.type = TOKEN_MULTIPLY;
             strcpy(token.lexeme, "*");
             break;
-        case '/': 
+        case '/':
             token.type = TOKEN_DIVIDE;
             strcpy(token.lexeme, "/");
             break;
@@ -138,9 +203,13 @@ Token get_next_token() {
             token.type = TOKEN_LT_OP;
             strcpy(token.lexeme, "<");
             break;
-        case '>': 
+        case '>':
             token.type = TOKEN_GT_OP;
             strcpy(token.lexeme, ">");
+            break;
+        case ',': // New: comma
+            token.type = TOKEN_COMMA;
+            strcpy(token.lexeme, ",");
             break;
         default:
             token.type = TOKEN_ERROR;
@@ -149,24 +218,29 @@ Token get_next_token() {
             fprintf(stderr, "Lexical Error: Unexpected character '%c' at position %d\n", c, current_pos);
             break;
     }
-    current_pos++; 
+    current_pos++; // Consume the character (or first character of a two-character operator like '==')
     return token;
 }
 
+// --- Parser Functions ---
+
+// Error reporting function
 void syntax_error(const char *expected_str) {
-    fprintf(stderr, "Syntax Error: Expected %s, but found '%s' (Type: %d) at position %zu\n", 
-            expected_str, current_token.lexeme, current_token.type, (size_t)current_pos - strlen(current_token.lexeme)); 
-    exit(1); 
+    fprintf(stderr, "Syntax Error: Expected %s, but found '%s' (Type: %d) at position %zu\n",
+            expected_str, current_token.lexeme, current_token.type, (size_t)current_pos - strlen(current_token.lexeme));
+    exit(1); // Exit on first error for simplicity
 }
 
+// Consumes the current token if it matches the expected type, otherwise reports an error
 void match(TokenType expected_type, const char *expected_str) {
     if (current_token.type == expected_type) {
-        current_token = get_next_token(); 
+        current_token = get_next_token(); // Move to the next token
     } else {
         syntax_error(expected_str);
     }
 }
 
+// Forward declarations for recursive descent functions
 void program();
 void declaration();
 void statement();
@@ -176,98 +250,172 @@ void additive_expression();
 void multiplicative_expression();
 void primary_expression();
 void block();
-void while_statement(); 
+void while_statement();
+void function_declaration(); // New: function declaration
+void parameter_list();       // New: parameter list for functions
+void return_statement();     // New: return statement
 
+// rule: program -> (preprocessor_directive | declaration | statement | function_declaration)* EOF
 void program() {
-    current_token = get_next_token(); 
+    current_token = get_next_token(); // Get the first token
 
     while (current_token.type != TOKEN_EOF) {
-        if (current_token.type == TOKEN_INT_KEYWORD) {
-            declaration();
+        if (current_token.type == TOKEN_HASH) { // New: Handle preprocessor directive
+            printf("Parsed: Preprocessor Directive (line skipped)\n");
+            current_token = get_next_token(); // Consume the HASH token and continue
+        }
+        else if (current_token.type == TOKEN_INT_KEYWORD) {
+            // Peek ahead to differentiate declaration from function_declaration
+            // This is a simple lookahead for ambiguous 'int Identifier'
+            Token next_tok = get_next_token(); // Temporarily get next token
+            int prev_pos = current_pos; // Store current position
+            Token temp_tok = current_token; // Store current token
+
+            current_token = next_tok; // Make next_tok current
+            next_tok = get_next_token(); // Get the token AFTER the identifier
+
+            current_pos = prev_pos; // Restore position
+            current_token = temp_tok; // Restore original current_token
+
+            if (next_tok.type == TOKEN_IDENTIFIER && input_code[current_pos + strlen(current_token.lexeme) + strlen(next_tok.lexeme) + 1] == '(') {
+                 // It's likely a function declaration: "int IDENTIFIER ("
+                function_declaration();
+            } else {
+                declaration();
+            }
         } else if (current_token.type == TOKEN_IDENTIFIER ||
                    current_token.type == TOKEN_IF_KEYWORD ||
-                   current_token.type == TOKEN_WHILE_KEYWORD) { 
+                   current_token.type == TOKEN_WHILE_KEYWORD ||
+                   current_token.type == TOKEN_RETURN_KEYWORD) { // New: Check for return keyword
             statement();
         } else {
-            syntax_error("a declaration or a statement");
+            syntax_error("a preprocessor directive, declaration, statement, or function declaration");
         }
     }
     printf("Parsing complete. No syntax errors found.\n");
 }
 
+// rule: declaration -> 'int' IDENTIFIER ';'
 void declaration() {
     match(TOKEN_INT_KEYWORD, "'int' keyword");
     match(TOKEN_IDENTIFIER, "an identifier");
     match(TOKEN_SEMICOLON, "a semicolon ';'");
-    printf("Parsed: Declaration\n");
+    printf("Parsed: Variable Declaration\n");
 }
 
+// rule: statement -> assignment_statement | if_statement | while_statement | return_statement
 void statement() {
-    if (current_token.type == TOKEN_IDENTIFIER) { 
+    if (current_token.type == TOKEN_IDENTIFIER) { // Assignment statement
         match(TOKEN_IDENTIFIER, "an identifier for assignment");
         match(TOKEN_ASSIGN_OP, "an assignment operator '='");
-        expression(); 
+        expression();
         match(TOKEN_SEMICOLON, "a semicolon ';'");
         printf("Parsed: Assignment Statement\n");
-    } else if (current_token.type == TOKEN_IF_KEYWORD) { 
+    } else if (current_token.type == TOKEN_IF_KEYWORD) { // If statement
         match(TOKEN_IF_KEYWORD, "'if' keyword");
         match(TOKEN_LPAREN, "an opening parenthesis '('");
-        expression();
+        expression(); // Condition
         match(TOKEN_RPAREN, "a closing parenthesis ')'");
-        block();     
+        block();      // Body of the if statement
         printf("Parsed: If Statement\n");
-    } else if (current_token.type == TOKEN_WHILE_KEYWORD) {
+    } else if (current_token.type == TOKEN_WHILE_KEYWORD) { // While statement
         while_statement();
+    } else if (current_token.type == TOKEN_RETURN_KEYWORD) { // New: Return statement
+        return_statement();
     } else {
-        syntax_error("an assignment statement, an if statement, or a while statement");
+        syntax_error("an assignment statement, an if statement, a while statement, or a return statement");
     }
 }
 
+// rule: while_statement -> 'while' '(' expression ')' block
 void while_statement() {
     match(TOKEN_WHILE_KEYWORD, "'while' keyword");
     match(TOKEN_LPAREN, "an opening parenthesis '('");
-    expression();
+    expression(); // Condition
     match(TOKEN_RPAREN, "a closing parenthesis ')'");
-    block();      
+    block();      // Body of the while statement
     printf("Parsed: While Statement\n");
 }
 
+// New: rule: function_declaration -> 'int' IDENTIFIER '(' parameter_list ')' block
+void function_declaration() {
+    match(TOKEN_INT_KEYWORD, "'int' keyword (for return type)");
+    match(TOKEN_IDENTIFIER, "a function name identifier");
+    match(TOKEN_LPAREN, "an opening parenthesis '(' for parameters");
+    parameter_list();
+    match(TOKEN_RPAREN, "a closing parenthesis ')' for parameters");
+    block(); // Function body
+    printf("Parsed: Function Declaration\n");
+}
+
+// New: rule: parameter_list -> ( 'int' IDENTIFIER ( ',' 'int' IDENTIFIER )* )?
+void parameter_list() {
+    // Check if the list is not empty (i.e., starts with 'int')
+    if (current_token.type == TOKEN_INT_KEYWORD) {
+        match(TOKEN_INT_KEYWORD, "'int' keyword for parameter type");
+        match(TOKEN_IDENTIFIER, "an identifier for parameter name");
+
+        // Loop for additional parameters separated by commas
+        while (current_token.type == TOKEN_COMMA) {
+            match(TOKEN_COMMA, "a comma ','");
+            match(TOKEN_INT_KEYWORD, "'int' keyword for subsequent parameter type");
+            match(TOKEN_IDENTIFIER, "an identifier for subsequent parameter name");
+        }
+    }
+    // If current_token is not TOKEN_INT_KEYWORD, it means the parameter list is empty, which is valid.
+    printf("Parsed: Parameter List\n");
+}
+
+// New: rule: return_statement -> 'return' expression ';'
+void return_statement() {
+    match(TOKEN_RETURN_KEYWORD, "'return' keyword");
+    expression(); // Return value can be an expression
+    match(TOKEN_SEMICOLON, "a semicolon ';'");
+    printf("Parsed: Return Statement\n");
+}
+
+
+// rule: expression -> comparison_expression
 void expression() {
     comparison_expression();
 }
 
+// rule: comparison_expression -> additive_expression ( ( '==' | '<' | '>' ) additive_expression )*
 void comparison_expression() {
     additive_expression();
     while (current_token.type == TOKEN_EQ_OP ||
            current_token.type == TOKEN_LT_OP ||
            current_token.type == TOKEN_GT_OP) {
-        TokenType op_type = current_token.type; 
+        TokenType op_type = current_token.type; // Store operator type
         match(op_type, "a comparison operator (==, <, or >)");
         additive_expression();
         printf("Parsed: Comparison Operation\n");
     }
 }
 
+// rule: additive_expression -> multiplicative_expression ( ( '+' | '-' ) multiplicative_expression )*
 void additive_expression() {
     multiplicative_expression();
     while (current_token.type == TOKEN_PLUS || current_token.type == TOKEN_MINUS) {
-        TokenType op_type = current_token.type;
+        TokenType op_type = current_token.type; // Store operator type
         match(op_type, "an additive operator (+ or -)");
         multiplicative_expression();
         printf("Parsed: Additive Operation\n");
     }
 }
 
+// rule: multiplicative_expression -> primary_expression ( ( '*' | '/' ) primary_expression )*
 void multiplicative_expression() {
     primary_expression();
     while (current_token.type == TOKEN_MULTIPLY || current_token.type == TOKEN_DIVIDE) {
-        TokenType op_type = current_token.type; 
+        TokenType op_type = current_token.type; // Store operator type
         match(op_type, "a multiplicative operator (* or /)");
         primary_expression();
         printf("Parsed: Multiplicative Operation\n");
     }
 }
 
+// rule: primary_expression -> IDENTIFIER | NUMBER | '(' expression ')'
 void primary_expression() {
     if (current_token.type == TOKEN_IDENTIFIER) {
         match(TOKEN_IDENTIFIER, "an identifier");
@@ -277,7 +425,7 @@ void primary_expression() {
         printf("Parsed: Number in Expression\n");
     } else if (current_token.type == TOKEN_LPAREN) {
         match(TOKEN_LPAREN, "an opening parenthesis '('");
-        expression();
+        expression(); // Recursive call for nested expressions
         match(TOKEN_RPAREN, "a closing parenthesis ')'");
         printf("Parsed: Parenthesized Expression\n");
     } else {
@@ -285,32 +433,51 @@ void primary_expression() {
     }
 }
 
+// rule: block -> '{' (declaration | statement | function_declaration)* '}'
 void block() {
     match(TOKEN_LBRACE, "an opening brace '{'");
     while (current_token.type != TOKEN_RBRACE && current_token.type != TOKEN_EOF) {
         if (current_token.type == TOKEN_INT_KEYWORD) {
-            declaration();
+            // Same lookahead logic as in program() to distinguish declarations from nested function declarations
+            Token next_tok = get_next_token();
+            int prev_pos = current_pos;
+            Token temp_tok = current_token;
+
+            current_token = next_tok;
+            next_tok = get_next_token();
+
+            current_pos = prev_pos;
+            current_token = temp_tok;
+
+            if (next_tok.type == TOKEN_IDENTIFIER && input_code[current_pos + strlen(current_token.lexeme) + strlen(next_tok.lexeme) + 1] == '(') {
+                // If it looks like a function declaration, parse it as such
+                function_declaration();
+            } else {
+                declaration(); // Otherwise, it's a variable declaration
+            }
         } else if (current_token.type == TOKEN_IDENTIFIER ||
                    current_token.type == TOKEN_IF_KEYWORD ||
-                   current_token.type == TOKEN_WHILE_KEYWORD) { 
+                   current_token.type == TOKEN_WHILE_KEYWORD ||
+                   current_token.type == TOKEN_RETURN_KEYWORD) { // New: Check for return keyword
             statement();
         } else {
-            syntax_error("a declaration, a statement, or a closing brace '}'");
+            syntax_error("a declaration, a statement, or a closing brace '}' inside block");
         }
     }
     match(TOKEN_RBRACE, "a closing brace '}'");
     printf("Parsed: Block\n");
 }
 
+// --- Main Function ---
 int main() {
-    #define MAX_INPUT_SIZE 2048
+    #define MAX_INPUT_SIZE 4096 // Increased buffer size for larger code
 
     printf("Enter your C code to analyze (max %d characters).\n", MAX_INPUT_SIZE - 1);
     printf("Press Enter twice after typing your code, or press Ctrl+Z (Windows) / Ctrl+D (Unix/Linux) and then Enter to signal end of input:\n");
     printf("--------------------------------------------------------------------------------\n");
 
     size_t total_length = 0;
-    char line_buffer[256]; // Buffer for each line read
+    char line_buffer[256];
 
     input_code = (char *)malloc(MAX_INPUT_SIZE);
     if (input_code == NULL) {
@@ -340,8 +507,8 @@ int main() {
     current_pos = 0;
 
     printf("Starting syntax analysis...\n\n");
-    program(); // Start the parsing process
+    program();
 
-    free(input_code); // Free allocated memory
+    free(input_code);
     return 0;
 }
